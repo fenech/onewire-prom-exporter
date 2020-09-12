@@ -7,7 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"regexp"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,8 +24,8 @@ type sensor struct {
 }
 
 var (
-	sensors             = make([]sensor, 1, 2)
-	onewireDevicePath   = "/sys/bus/w1/devices/"
+	sensors             []sensor
+	onewireDevicePath   = "/mnt/1wire/"
 	onewireDeviceList   []string
 	hostname, _         = os.Hostname()
 	listenAddress       = flag.String("web.listen-address", ":8105", "Address and port to expose metrics")
@@ -87,7 +87,7 @@ func rootPathHandler(w http.ResponseWriter, r *http.Request) {
 
 func jsonPathHandler(w http.ResponseWriter, r *http.Request) {
 	jsonData, _ := json.Marshal(sensors)
-	fmt.Fprintf(w, "%s", string(jsonData))
+	w.Write(jsonData)
 }
 
 func observeOnewireTemperature() {
@@ -97,8 +97,7 @@ func observeOnewireTemperature() {
 		log.Fatal("Error getting Onewire device list")
 	}
 	for {
-		sensors = sensors[:len(onewireDeviceList)]
-		index := 0
+		sensors = []sensor{}
 		for _, deviceID := range onewireDeviceList {
 			value, err := readOnewireDevicePayload(deviceID)
 			if err != nil {
@@ -106,37 +105,53 @@ func observeOnewireTemperature() {
 			}
 			log.WithFields(log.Fields{"deviceID": deviceID, "value": value, "hostname": hostname}).Info("Value read from device")
 			onewireTemperatureC.With(prometheus.Labels{"device_id": deviceID, "hostname": hostname}).Set(value)
-			sensors[index] = sensor{SensorID: deviceID, SensorType: "temperature", SensorValue: value}
-			index++
+			sensors = append(sensors, sensor{SensorID: deviceID, SensorType: "temperature", SensorValue: value})
 		}
-		time.Sleep(60 * time.Second)
+		time.Sleep(10 * time.Second)
 	}
 }
 
 func readOnewireDevicePayload(deviceID string) (float64, error) {
-	devicePayloadFile := fmt.Sprintf("%s%s/w1_slave", onewireDevicePath, deviceID)
+	devicePayloadFile := temperatureFilePath(deviceID)
 	buffer, err := ioutil.ReadFile(devicePayloadFile)
 	if err != nil {
-		log.WithFields(log.Fields{"devicePayloadFile": devicePayloadFile}).Error("Error reading Device")
+		log.WithFields(log.Fields{"devicePayloadFile": devicePayloadFile}).Error("Error reading file")
 		return 0, err
 	}
-	re := regexp.MustCompile(`(?s).*YES.*t=([0-9]+)`)
-	value, _ := strconv.ParseFloat(re.FindStringSubmatch(string(buffer))[1], 64)
-	return value / 1000, nil
+
+	value, err := strconv.ParseFloat(string(buffer), 64)
+	if err != nil {
+		log.WithFields(log.Fields{"devicePayloadFile": devicePayloadFile}).Error("Error parsing temperature value")
+		return 0, err
+	}
+
+	return value, nil
 }
 
 func createOnewireDeviceList() error {
-	devices, err := ioutil.ReadDir(onewireDevicePath)
+	files, err := ioutil.ReadDir(onewireDevicePath)
 	if err != nil {
-		log.Fatalf("Can't read device directory %v", err)
-		return nil
+		return err
 	}
-	// searching for onewire attached devices
-	for _, device := range devices {
-		if strings.Contains(device.Name(), "w1_bus_master1") != true {
-			onewireDeviceList = append(onewireDeviceList, device.Name())
-			log.Infof("Device found: %s", device.Name())
+
+	for _, f := range files {
+		if !f.IsDir() || !strings.HasPrefix(f.Name(), "28.") {
+			continue
 		}
+
+		p := temperatureFilePath(f.Name())
+		_, err := os.Stat(p)
+		if os.IsNotExist(err) {
+			continue
+		}
+
+		onewireDeviceList = append(onewireDeviceList, f.Name())
+		log.Infof("Device found: %s", f.Name())
 	}
+
 	return nil
+}
+
+func temperatureFilePath(deviceID string) string {
+	return path.Join(onewireDevicePath, deviceID, "temperature")
 }
