@@ -73,7 +73,7 @@ jobs:
         run: >
           docker buildx build
           --cache-from "type=local,src=/tmp/.buildx-cache"
-          --output "type=image,push=true"
+          --output "type=image,push=true,oci-mediatypes=true"
           ${{ steps.prepare.outputs.buildx_args }}
 
       - name: Inspect image
