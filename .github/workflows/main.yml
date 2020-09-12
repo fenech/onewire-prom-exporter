@@ -56,10 +56,10 @@ jobs:
       - name: Run Buildx
         run: >
           docker buildx build
-            --cache-from "type=local,src=/tmp/.buildx-cache"
-            --cache-to "type=local,dest=/tmp/.buildx-cache"
-            --output "type=image,push=false"
-            ${{ steps.prepare.outputs.buildx_args }}
+          --cache-from "type=local,src=/tmp/.buildx-cache"
+          --cache-to "type=local,dest=/tmp/.buildx-cache"
+          --output "type=image,push=false"
+          ${{ steps.prepare.outputs.buildx_args }}
 
       - name: Login to DockerHub
         if: success()
@@ -72,9 +72,9 @@ jobs:
         if: success()
         run: >
           docker buildx build
-            --cache-from "type=local,src=/tmp/.buildx-cache"
-            --output "type=image,push=true"
-            ${{ steps.prepare.outputs.buildx_args }}
+          --cache-from "type=local,src=/tmp/.buildx-cache"
+          --output "type=image,push=true"
+          ${{ steps.prepare.outputs.buildx_args }}
 
       - name: Inspect image
         if: always()
