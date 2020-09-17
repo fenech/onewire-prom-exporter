@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -46,32 +45,21 @@ var (
 func init() {
 	// Log as JSON instead of the default ASCII formatter.
 	log.SetFormatter(&log.JSONFormatter{})
-
-	// Output to stdout instead of the default stderr
-	// Can be any io.Writer, see below for File example
-	log.SetOutput(os.Stdout)
-
-	// Only log the warning severity or above.
-	//log.SetLevel(log.WarnLevel)
-	// Parsing command line arguments
 	flag.Parse()
-	// Registers temperature gauges
 	prometheus.MustRegister(onewireTemperatureC)
 }
 
 func main() {
 	log.Info("Started")
-	// install net/http handlers
+
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", rootPathHandler)
 	http.HandleFunc(*jsonMetricsPath, jsonPathHandler)
 
-	// launch prometheus metrics handler as a goroutine
 	go observeOnewireTemperature()
-	// starts http listener
+
 	log.WithFields(log.Fields{"httpListen": *listenAddress}).Info("Exporter listening")
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
-
 }
 
 func rootPathHandler(w http.ResponseWriter, r *http.Request) {
@@ -91,11 +79,11 @@ func jsonPathHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func observeOnewireTemperature() {
-	// lists onewire devices
 	err := createOnewireDeviceList()
 	if err != nil {
 		log.Fatal("Error getting Onewire device list")
 	}
+
 	for {
 		sensors = []sensor{}
 		for _, deviceID := range onewireDeviceList {
@@ -135,18 +123,31 @@ func createOnewireDeviceList() error {
 	}
 
 	for _, f := range files {
-		if !f.IsDir() || !strings.HasPrefix(f.Name(), "28.") {
+		if !f.IsDir() {
+			continue
+		}
+		dirName := f.Name()
+
+		df := path.Join(onewireDevicePath, dirName, "family")
+		if family, err := ioutil.ReadFile(df); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			log.WithFields(log.Fields{"deviceFamilyFilePath": df}).Error("Error reading file")
+		} else if string(family) != "28" {
 			continue
 		}
 
-		p := temperatureFilePath(f.Name())
-		_, err := os.Stat(p)
-		if os.IsNotExist(err) {
-			continue
+		p := temperatureFilePath(dirName)
+		if _, err := os.Stat(p); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			log.WithFields(log.Fields{"temperatureFilePath": p}).Error("Error reading file")
 		}
 
-		onewireDeviceList = append(onewireDeviceList, f.Name())
-		log.Infof("Device found: %s", f.Name())
+		onewireDeviceList = append(onewireDeviceList, dirName)
+		log.Infof("Device found: %s", dirName)
 	}
 
 	return nil
